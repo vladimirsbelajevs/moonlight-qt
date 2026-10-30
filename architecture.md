@@ -1245,9 +1245,13 @@ queue. See [AudioStream.c](moonlight-common-c/moonlight-common-c/src/AudioStream
 Audio packet duration controls its sample cadence, independent of video FPS.
 
 The SDL renderer requests at least 480 samples (10 ms) or three Opus frames,
-providing buffering for audio jitter. It uses pending-audio and device-queue
-limits (including 30 ms and 50 ms checks) rather than video timestamps to control
-backpressure. Audio startup intentionally discards an initial backlog of about
+providing buffering for audio jitter. It discards a decoded frame when more
+than 30 ms is pending in Moonlight's packet queue or when adding the frame
+would put more than 50 ms of sample data in SDL's device queue. This avoids
+blocking the audio decoder on a full device queue; an SDL queue failure or
+stopped device triggers renderer reinitialization. These limits use queue depth
+rather than video timestamps and do not include the device's internal buffer.
+Audio startup intentionally discards an initial backlog of about
 500 ms; renderer reinitialization similarly prevents downtime becoming permanent
 queued audio latency. Muting can suppress audio processing without retiming VRR.
 
