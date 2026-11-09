@@ -13,6 +13,12 @@ class StreamingPreferences : public QObject
 public:
     static StreamingPreferences* get(QQmlEngine *qmlEngine = nullptr);
 
+    static constexpr int MinimumBitrateKbps = 5000;
+    static constexpr int MaximumBitrateKbps = 3000000;
+    static int clampBitrateKbps(int bitrateKbps);
+    int minimumBitrateKbps() const { return MinimumBitrateKbps; }
+    int maximumBitrateKbps() const { return MaximumBitrateKbps; }
+
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
@@ -165,9 +171,10 @@ public:
     Q_PROPERTY(int height MEMBER height NOTIFY displayModeChanged)
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
+    Q_PROPERTY(int minimumBitrateKbps READ minimumBitrateKbps CONSTANT)
+    Q_PROPERTY(int maximumBitrateKbps READ maximumBitrateKbps CONSTANT)
     // Calibrated PyroWave frame pace (0 = let the host choose); see PyroWaveLink::searchPace.
     Q_PROPERTY(int pyroWavePaceMbps MEMBER pyroWavePaceMbps NOTIFY bitrateChanged)
-    Q_PROPERTY(bool unlockBitrate MEMBER unlockBitrate NOTIFY unlockBitrateChanged)
     Q_PROPERTY(bool autoAdjustBitrate MEMBER autoAdjustBitrate NOTIFY autoAdjustBitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
     Q_PROPERTY(bool enableVrr MEMBER enableVrr NOTIFY enableVrrChanged)
@@ -239,7 +246,6 @@ public:
     int height;
     int fps;
     int bitrateKbps;
-    bool unlockBitrate;
     bool autoAdjustBitrate;
     bool enableVsync;
     bool enableVrr;
@@ -306,7 +312,6 @@ private:
 signals:
     void displayModeChanged();
     void bitrateChanged();
-    void unlockBitrateChanged();
     void autoAdjustBitrateChanged();
     void enableVsyncChanged();
     void enableVrrChanged();
