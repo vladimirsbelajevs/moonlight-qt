@@ -1,0 +1,140 @@
+# Push a downstream-<full commit SHA> tag at the current downstream tip to release it.
+name: Publish fork Flatpak release
+
+on:
+  push:
+    tags:
+      - 'downstream-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-flatpak-release-downstream
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'vladimirsbelajevs/moonlight-qt' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    outputs:
+      ci_version: ${{ steps.release.outputs.ci_version }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - name: Verify downstream tag and derive release identity
+        id: release
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          tag=${GITHUB_REF#refs/tags/}
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$tag" != "downstream-$source_sha" ]]; then
+            echo 'The release tag must be downstream-<full downstream commit SHA>.' >&2
+            exit 1
+          fi
+          test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$source_sha"
+          git fetch --no-tags origin +refs/heads/downstream:refs/remotes/origin/downstream
+          if [[ "$(git rev-parse refs/remotes/origin/downstream)" != "$source_sha" ]]; then
+            echo 'Release tags must point to the current downstream tip.' >&2
+            exit 1
+          fi
+          source_base=$(git show "$source_sha:app/version.txt" | tr -d '\r\n')
+          [[ "$source_base" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          ci_version="${source_base}-downstream.${source_sha:0:12}"
+          echo "ci_version=$ci_version" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  flatpak:
+    needs: prepare
+    uses: ./.github/workflows/build-flatpak.yml
+    with:
+      ci_version: ${{ needs.prepare.outputs.ci_version }}
+      source_ref: ${{ needs.prepare.outputs.source_sha }}
+
+  publish:
+    needs: [prepare, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CI_VERSION: ${{ needs.prepare.outputs.ci_version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v6
+        with:
+          name: Moonlight-Flatpak-${{ needs.prepare.outputs.ci_version }}
+          path: release-assets
+      - name: Verify bundle and prepare release notes
+        run: |
+          set -euo pipefail
+          asset="Moonlight-$CI_VERSION-x86_64.flatpak"
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 1
+          test -s "release-assets/$asset"
+          (cd release-assets && sha256sum "$asset" > SHA256SUMS)
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists" >&2
+            exit 1
+          fi
+          current=$(git ls-remote --heads origin refs/heads/downstream | cut -f1)
+          if [[ "$current" != "$SOURCE_SHA" ]]; then
+            echo 'downstream moved during the build; tag its new tip to retry.' >&2
+            exit 1
+          fi
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$SOURCE_SHA"
+          cat > release-notes.md <<EOF
+          Flatpak bundle built from the downstream branch at [source commit $SOURCE_SHA](https://github.com/$GH_REPO/commit/$SOURCE_SHA).
+
+          Download $asset below, then install it with:
+
+              flatpak install --user ./$asset
+              flatpak run --user com.moonlight_stream.Moonlight//master
+
+          This bundle uses the Flatpak master branch and a KDE runtime from Flathub. Download and install a newer bundle to update it.
+          EOF
+      - name: Create draft release and upload verified assets
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --repo "$GH_REPO" \
+            --title "Moonlight downstream ${SOURCE_SHA:0:12}" --notes-file release-notes.md \
+            --draft --prerelease --latest=false
+          gh release upload "$TAG" --repo "$GH_REPO" \
+            "release-assets/Moonlight-$CI_VERSION-x86_64.flatpak" release-assets/SHA256SUMS
+      - name: Verify uploaded files and publish
+        run: |
+          set -euo pipefail
+          mkdir verified-assets
+          gh release download "$TAG" --repo "$GH_REPO" --dir verified-assets
+          cmp release-assets/SHA256SUMS verified-assets/SHA256SUMS
+          (cd verified-assets && sha256sum --check SHA256SUMS)
+          gh release view "$TAG" --repo "$GH_REPO" \
+            --json isDraft,isPrerelease,tagName > draft-release.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads(Path('draft-release.json').read_text())
+          assert release['isDraft'] is True
+          assert release['isPrerelease'] is True
+          assert release['tagName'] == os.environ['TAG']
+          PY
+          current=$(git ls-remote --heads origin refs/heads/downstream | cut -f1)
+          if [[ "$current" != "$SOURCE_SHA" ]]; then
+            echo 'downstream moved before publication; the draft was left unpublished.' >&2
+            exit 1
+          fi
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$SOURCE_SHA"
+          gh release edit "$TAG" --repo "$GH_REPO" --draft=false
