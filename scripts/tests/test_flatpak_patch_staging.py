@@ -41,8 +41,32 @@ class FlatpakPatchStagingTests(unittest.TestCase):
                 self.assertEqual(staged.read_bytes(), (ROOT / PATCH).read_bytes())
                 self.assertEqual((root / PATCH).read_bytes(), (ROOT / PATCH).read_bytes())
                 self.assertEqual(modules['moonlight']['sources'][0]['commit'], source)
+                self.assertEqual(modules['moonlight']['sources'][0]['url'],
+                                 'https://github.com/vladimirsbelajevs/moonlight-qt.git')
                 self.assertEqual(modules['moonlight']['sources'][1]['commands'],
                                  ['echo 6.2.0-daily.195 > app/version.txt'])
+
+    def test_fork_release_uses_fork_source_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for path in (MANIFEST, PATCH):
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / path, root / path)
+            script = (ROOT / '.github/workflows/build-flatpak.yml').read_text()
+            step = script.split('- name: Pin manifest to release source and version', 1)[1]
+            match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", step, re.S)
+            self.assertIsNotNone(match)
+            source = 'b' * 40
+            env = dict(os.environ, SOURCE_SHA=source, CI_VERSION='6.2.0-downstream.bbbbbbbbbbbb')
+            subprocess.run([sys.executable, '-c', textwrap.dedent(match[1])],
+                           cwd=root, env=env, check=True)
+            manifest = json.loads((root / MANIFEST).read_text())
+            module = next(m for m in manifest['modules'] if m['name'] == 'moonlight')
+            self.assertEqual(module['sources'][0]['url'],
+                             'https://github.com/vladimirsbelajevs/moonlight-qt.git')
+            self.assertEqual(module['sources'][0]['commit'], source)
+            self.assertEqual(module['sources'][1]['commands'],
+                             ['echo 6.2.0-downstream.bbbbbbbbbbbb > app/version.txt'])
 
 
 if __name__ == '__main__':

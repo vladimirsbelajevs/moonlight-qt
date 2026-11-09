@@ -1,4 +1,4 @@
-name: Build - Linux Flatpak nightly
+name: Build - Linux Flatpak
 permissions:
   contents: read
 on:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       ci_version:
-        description: Exact nightly version
+        description: Exact Flatpak version
         required: true
         type: string
       source_ref:
@@ -83,7 +83,9 @@ jobs:
           sdl['build-options']['config-opts'].append('-DSDL_WAYLAND=ON')
           module['sources'][0]['commit'] = os.environ['SOURCE_SHA']
           import re
-          assert re.fullmatch(r'6\.[12]\.0-daily\.[1-9][0-9]*', os.environ['CI_VERSION'])
+          assert re.fullmatch(
+              r'(?:6\.[12]\.0-daily\.[1-9][0-9]*|[0-9]+\.[0-9]+\.[0-9]+-downstream\.[0-9a-f]{12})',
+              os.environ['CI_VERSION'])
           module['post-install'] = [
               'python3 -m unittest discover -s scripts/tests -p test_amdgpu_header_compat.py',
               'g++ -std=c++17 -fsyntax-only -Iapp/streaming scripts/linux-gpu-capability.cpp',
@@ -116,6 +118,7 @@ jobs:
           manifest = json.loads(Path('flatpak-build/files/manifest.json').read_text())
           modules = {m['name']: m for m in manifest['modules']}
           assert modules['moonlight']['sources'][0]['commit'] == os.environ['SOURCE_SHA']
+          assert modules['moonlight']['sources'][0]['url'] == 'https://github.com/vladimirsbelajevs/moonlight-qt.git'
           assert any(s['type'] == 'patch' and 'libplacebo-disable-internally-synchronized-queues.patch' in s['path'] for s in modules['libplacebo']['sources'])
           PY
       - name: Install exported bundle and verify isolated launch
@@ -136,6 +139,7 @@ jobs:
           manifest = json.loads((Path(os.environ['INSTALLED_PATH']) / 'files/manifest.json').read_text())
           module = next(m for m in manifest['modules'] if m['name'] == 'moonlight')
           assert module['sources'][0]['commit'] == os.environ['SOURCE_SHA']
+          assert module['sources'][0]['url'] == 'https://github.com/vladimirsbelajevs/moonlight-qt.git'
           assert module['sources'][1]['commands'] == ['echo ' + os.environ['CI_VERSION'] + ' > app/version.txt']
           assert (Path(os.environ['INSTALLED_PATH']) / 'files/bin/moonlight').is_file()
           PY
