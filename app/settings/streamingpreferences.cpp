@@ -25,7 +25,6 @@
 #define SER_HEIGHT "height"
 #define SER_FPS "fps"
 #define SER_BITRATE "bitrate"
-#define SER_UNLOCK_BITRATE "unlockbitrate"
 #define SER_AUTOADJUSTBITRATE "autoadjustbitrate"
 #define SER_FULLSCREEN "fullscreen"
 #define SER_VSYNC "vsync"
@@ -157,8 +156,8 @@ void StreamingPreferences::reload()
     height = settings.value(SER_HEIGHT, 720).toInt();
     fps = settings.value(SER_FPS, 60).toInt();
     enableYUV444 = settings.value(SER_YUV444, false).toBool();
-    bitrateKbps = settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps, enableYUV444)).toInt();
-    unlockBitrate = settings.value(SER_UNLOCK_BITRATE, false).toBool();
+    bitrateKbps = clampBitrateKbps(settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps, enableYUV444)).toInt());
+    settings.remove(QStringLiteral("unlockbitrate"));
     autoAdjustBitrate = settings.value(SER_AUTOADJUSTBITRATE, true).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     enableVrr = settings.value(SER_ENABLEVRR, false).toBool();
@@ -436,8 +435,12 @@ void StreamingPreferences::save()
     settings.setValue(SER_WIDTH, width);
     settings.setValue(SER_HEIGHT, height);
     settings.setValue(SER_FPS, fps);
+    const int boundedBitrateKbps = clampBitrateKbps(bitrateKbps);
+    if (bitrateKbps != boundedBitrateKbps) {
+        bitrateKbps = boundedBitrateKbps;
+        emit bitrateChanged();
+    }
     settings.setValue(SER_BITRATE, bitrateKbps);
-    settings.setValue(SER_UNLOCK_BITRATE, unlockBitrate);
     settings.setValue(SER_AUTOADJUSTBITRATE, autoAdjustBitrate);
     settings.setValue(SER_VSYNC, enableVsync);
     settings.setValue(SER_ENABLEVRR, enableVrr);
@@ -577,6 +580,11 @@ QVariantList StreamingPreferences::getFpsChoices(const QVariantList& refreshRate
     }
 
     return result;
+}
+
+int StreamingPreferences::clampBitrateKbps(int bitrateKbps)
+{
+    return qBound(MinimumBitrateKbps, bitrateKbps, MaximumBitrateKbps);
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

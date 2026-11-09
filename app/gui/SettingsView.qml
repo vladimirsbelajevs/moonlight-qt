@@ -303,7 +303,6 @@ Flickable {
 
                                 if (StreamingPreferences.autoAdjustBitrate) {
                                     StreamingPreferences.bitrateKbps = slider.defaultBitrate();
-                                    slider.value = StreamingPreferences.bitrateKbps
                                 }
                             }
 
@@ -467,7 +466,6 @@ Flickable {
 
                             if (fpsChanged && StreamingPreferences.autoAdjustBitrate) {
                                 StreamingPreferences.bitrateKbps = slider.defaultBitrate();
-                                slider.value = StreamingPreferences.bitrateKbps
                             }
 
                             lastIndexValue = currentIndex
@@ -728,11 +726,6 @@ Flickable {
                             // the other codecs', so switching in or out resets a default.
                             if (slider.pyroWave !== wasPyroWave && StreamingPreferences.autoAdjustBitrate) {
                                 StreamingPreferences.bitrateKbps = slider.defaultBitrate()
-                                slider.value = StreamingPreferences.bitrateKbps
-                            }
-                            else if (StreamingPreferences.bitrateKbps > slider.to) {
-                                StreamingPreferences.bitrateKbps = slider.to
-                                slider.value = StreamingPreferences.bitrateKbps
                             }
                         }
                     }
@@ -756,7 +749,6 @@ Flickable {
                             StreamingPreferences.enableYUV444 = checked
                             if (StreamingPreferences.autoAdjustBitrate) {
                                 StreamingPreferences.bitrateKbps = slider.defaultBitrate();
-                                slider.value = StreamingPreferences.bitrateKbps
                             }
                         }
                     }
@@ -773,7 +765,7 @@ Flickable {
                 Label {
                     width: parent.width
                     id: bitrateTitle
-                    text: qsTr("Video bitrate:")
+                    text: qsTr("Video bitrate: %1 Mbps").arg(StreamingPreferences.bitrateKbps / 1000.0)
                     font.pointSize: 12
                     wrapMode: Text.Wrap
                 }
@@ -794,43 +786,60 @@ Flickable {
                         id: slider
 
                         readonly property bool pyroWave: StreamingPreferences.videoCodecConfig === StreamingPreferences.VCC_FORCE_PYROWAVE
+                        readonly property int minimumBitrateKbps: StreamingPreferences.minimumBitrateKbps
+                        readonly property int maximumBitrateKbps: StreamingPreferences.maximumBitrateKbps
+                        readonly property int bitrateStepKbps: 5000
+
+                        function positionForBitrate(bitrateKbps) {
+                            var bounded = Math.max(minimumBitrateKbps, Math.min(maximumBitrateKbps, bitrateKbps))
+                            return Math.log(bounded / minimumBitrateKbps) /
+                                   Math.log(maximumBitrateKbps / minimumBitrateKbps)
+                        }
+
+                        function bitrateForPosition(position) {
+                            var bitrate = minimumBitrateKbps *
+                                          Math.pow(maximumBitrateKbps / minimumBitrateKbps, position)
+                            return Math.max(minimumBitrateKbps,
+                                            Math.min(maximumBitrateKbps,
+                                                     Math.round(bitrate / bitrateStepKbps) * bitrateStepKbps))
+                        }
 
                         // PyroWave needs several hundred Mbps, up to multi-gigabit LANs
                         function defaultBitrate() {
                             if (pyroWave) {
-                                return StreamingPreferences.getDefaultPyroWaveBitrate(StreamingPreferences.width,
-                                                                                      StreamingPreferences.height,
-                                                                                      StreamingPreferences.fps,
-                                                                                      StreamingPreferences.enableYUV444,
-                                                                                      StreamingPreferences.enableHdr)
+                                return Math.max(minimumBitrateKbps, Math.min(maximumBitrateKbps,
+                                    StreamingPreferences.getDefaultPyroWaveBitrate(StreamingPreferences.width,
+                                                                                  StreamingPreferences.height,
+                                                                                  StreamingPreferences.fps,
+                                                                                  StreamingPreferences.enableYUV444,
+                                                                                  StreamingPreferences.enableHdr)))
                             }
-                            return StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
-                                                                          StreamingPreferences.height,
-                                                                          StreamingPreferences.fps,
-                                                                          StreamingPreferences.enableYUV444)
+                            return Math.max(minimumBitrateKbps, Math.min(maximumBitrateKbps,
+                                StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
+                                                                       StreamingPreferences.height,
+                                                                       StreamingPreferences.fps,
+                                                                       StreamingPreferences.enableYUV444)))
                         }
 
-                        value: StreamingPreferences.bitrateKbps
-
-                        stepSize: pyroWave ? 5000 : 500
-                        from : pyroWave ? 5000 : 500
-                        to: pyroWave ? 3000000 : (StreamingPreferences.unlockBitrate ? 500000 : 150000)
-
-                        snapMode: "SnapOnRelease"
+                        from: 0
+                        to: 1
+                        value: positionForBitrate(StreamingPreferences.bitrateKbps)
                         width: Math.min(bitrateDesc.implicitWidth, parent.width - (resetBitrateButton.visible ? resetBitrateButton.width + parent.spacing : 0))
 
-                        onValueChanged: {
-                            bitrateTitle.text = qsTr("Video bitrate: %1 Mbps").arg(value / 1000.0)
-                            StreamingPreferences.bitrateKbps = value
-                        }
-
                         onMoved: {
+                            StreamingPreferences.bitrateKbps = bitrateForPosition(value)
                             StreamingPreferences.autoAdjustBitrate = false
                         }
 
-                        Component.onCompleted: {
-                            // Refresh the text after translations change
-                            languageChanged.connect(valueChanged)
+                        Keys.onPressed: function(event) {
+                            if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                                var direction = event.key === Qt.Key_Right ? 1 : -1
+                                StreamingPreferences.bitrateKbps = Math.max(minimumBitrateKbps,
+                                    Math.min(maximumBitrateKbps,
+                                        StreamingPreferences.bitrateKbps + direction * bitrateStepKbps))
+                                StreamingPreferences.autoAdjustBitrate = false
+                                event.accepted = true
+                            }
                         }
                     }
 
@@ -842,7 +851,6 @@ Flickable {
                             var defaultBitrate = slider.defaultBitrate()
                             StreamingPreferences.bitrateKbps = defaultBitrate
                             StreamingPreferences.autoAdjustBitrate = true
-                            slider.value = defaultBitrate
                         }
                     }
                 }
@@ -1132,7 +1140,6 @@ Flickable {
                         // The tested frame pace; 0 lets the host use its default.
                         StreamingPreferences.pyroWavePaceMbps = PyroWaveCalibrator.paceMbps
                         StreamingPreferences.autoAdjustBitrate = false
-                        slider.value = StreamingPreferences.bitrateKbps
 
                         var found = false
                         for (var i = 0; i < resolutionListModel.count; i++) {
@@ -1898,7 +1905,6 @@ Flickable {
                             // PyroWave's default bitrate depends on HDR
                             if (slider.pyroWave && StreamingPreferences.autoAdjustBitrate) {
                                 StreamingPreferences.bitrateKbps = slider.defaultBitrate();
-                                slider.value = StreamingPreferences.bitrateKbps
                             }
                         }
                     }
@@ -3106,25 +3112,6 @@ Flickable {
                     onActivated : {
                         StreamingPreferences.rendererSelection = rendererListModel.get(currentIndex).val
                     }
-                }
-
-                CheckBox {
-                    id: unlockBitrate
-                    width: parent.width
-                    text: qsTr("Unlock bitrate limit (Experimental)")
-                    font.pointSize: 12
-
-                    checked: StreamingPreferences.unlockBitrate
-                    onCheckedChanged: {
-                        StreamingPreferences.unlockBitrate = checked
-                        StreamingPreferences.bitrateKbps = Math.min(StreamingPreferences.bitrateKbps, slider.to)
-                        slider.value = StreamingPreferences.bitrateKbps
-                    }
-
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 5000
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("This unlocks extremely high video bitrates for use with Sunshine hosts. It should only be used when streaming over an Ethernet LAN connection.")
                 }
 
                 CheckBox {

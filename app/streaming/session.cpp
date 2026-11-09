@@ -845,7 +845,7 @@ bool Session::initialize(QQuickWindow* qtWindow)
 
     m_StreamConfig.fps = m_Preferences->fps;
     snapshotPresentationSettings(testWindow);
-    m_StreamConfig.bitrate = m_Preferences->bitrateKbps;
+    m_StreamConfig.bitrate = StreamingPreferences::clampBitrateKbps(m_Preferences->bitrateKbps);
 
 #ifndef STEAM_LINK
     // Opt-in to all encryption features if we detect that the platform
@@ -1934,10 +1934,11 @@ bool Session::startConnectionAsync()
                                                                           m_StreamConfig.height,
                                                                           m_StreamConfig.fps,
                                                                           true)) {
-        m_StreamConfig.bitrate = StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
-                                                                         m_StreamConfig.height,
-                                                                         m_StreamConfig.fps,
-                                                                         false);
+        m_StreamConfig.bitrate = StreamingPreferences::clampBitrateKbps(
+            StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
+                                                    m_StreamConfig.height,
+                                                    m_StreamConfig.fps,
+                                                    false));
     }
 
     // Likewise, a PyroWave default bitrate is far too high for the H.264
@@ -1949,10 +1950,11 @@ bool Session::startConnectionAsync()
                                                                                   m_StreamConfig.fps,
                                                                                   m_Preferences->enableYUV444,
                                                                                   m_Preferences->enableHdr)) {
-        m_StreamConfig.bitrate = StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
-                                                                         m_StreamConfig.height,
-                                                                         m_StreamConfig.fps,
-                                                                         false);
+        m_StreamConfig.bitrate = StreamingPreferences::clampBitrateKbps(
+            StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
+                                                    m_StreamConfig.height,
+                                                    m_StreamConfig.fps,
+                                                    false));
     }
 
     // PyroWave partial frames: let the receive thread release a frame that

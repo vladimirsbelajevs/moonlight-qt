@@ -133,6 +133,14 @@ The FPS picker is advisory and independent of the VRR setting. It offers fixed
 remains selectable. Toggling VRR does not rewrite saved FPS;
 `m_StreamConfig.fps` receives the requested preference.
 
+The bitrate picker uses one logarithmic slider for standard codecs and
+PyroWave, from 5 to 3,000 Mbps in 5 Mbps increments. There is no separate
+bitrate-unlock preference. Saved values outside that range are clamped when
+loaded, and the session clamps its configured bitrate before negotiation.
+The standard SDP bitrate fields still reserve 20% for FEC and cap the encoder
+request at 100 Mbps; Sunshine also receives the uncapped configured bitrate in
+`x-ml-video.configuredBitrateKbps`.
+
 `snapshotPresentationSettings()` resolves that request for the session:
 
 1. Query the actual window display refresh. An unavailable refresh may fall
