@@ -32,10 +32,14 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
     // The buffering helps avoid audio underruns due to network jitter.
     want.samples = SDL_max(480, opusConfig->samplesPerFrame * 3);
 
-    m_FrameDurationMs = opusConfig->samplesPerFrame / (opusConfig->sampleRate / 1000);
     m_FrameSize = opusConfig->samplesPerFrame *
                   opusConfig->channelCount *
                   getAudioBufferSampleSize();
+    // Limit the queued sample data to 50 ms, including the frame being submitted.
+    m_MaxQueuedBytes = SDL_max(m_FrameSize,
+                               (Uint32)((Uint64)opusConfig->sampleRate *
+                                        opusConfig->channelCount *
+                                        getAudioBufferSampleSize() * 50 / 1000));
 
     m_AudioDevice = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (m_AudioDevice == 0) {
@@ -100,34 +104,24 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
         return true;
     }
 
-    // Don't queue if there's already more than 30 ms of audio data waiting
-    // in Moonlight's audio queue.
-    if (LiGetPendingAudioDuration() > 30) {
-        return true;
+    // Our device may enter a permanent error status upon removal, so recreate
+    // it to pick up the new default audio device.
+    if (SDL_GetAudioDeviceStatus(m_AudioDevice) == SDL_AUDIO_STOPPED) {
+        return false;
     }
 
-    // Provide backpressure on the queue to ensure too many frames don't build up
-    // in SDL's audio queue, but don't wait forever to avoid a deadlock if the
-    // audio device fails.
-    for (int i = 0; i < 100; i++) {
-        // Our device may enter a permanent error status upon removal, so we need
-        // to recreate the audio device to pick up the new default audio device.
-        if (SDL_GetAudioDeviceStatus(m_AudioDevice) == SDL_AUDIO_STOPPED) {
-            return false;
-        }
-
-        // Only queue more samples where there is 50 ms or less in SDL's queue
-        if (SDL_GetQueuedAudioSize(m_AudioDevice) / m_FrameSize * m_FrameDurationMs <= 50) {
-            break;
-        }
-
-        SDL_Delay(1);
+    // Discard this decoded frame when either queue is backed up. Waiting here
+    // would also stall the decoder thread and fill Moonlight's packet queue.
+    if (LiGetPendingAudioDuration() > 30 ||
+            (Uint64)SDL_GetQueuedAudioSize(m_AudioDevice) + bytesWritten > m_MaxQueuedBytes) {
+        return true;
     }
 
     if (SDL_QueueAudio(m_AudioDevice, m_AudioBuffer, bytesWritten) < 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to queue audio sample: %s",
                      SDL_GetError());
+        return false;
     }
 
     return true;
